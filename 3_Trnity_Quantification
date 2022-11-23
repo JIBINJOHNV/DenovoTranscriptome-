@@ -1,0 +1,34 @@
+
+##QUANTFY 
+mkdir -p  Quantification/kallisto/Treated_1/
+mkdir -p  Quantification/kallisto/Control_1/
+mkdir -p  Quantification/kallisto/matrix/
+
+
+docker run -it -v`pwd`:`pwd` -v`pwd`:/Data/ trinityrnaseq/trinityrnaseq 
+
+
+/usr/local/bin/util/align_and_estimate_abundance.pl \
+    --transcripts /Data/Trinity.Trinity.fasta \
+    --samples_file /Data/SampleDetails.txt --seqTyp fq \
+     --est_method kallisto --aln_method bowtie2 --trinity_mode --output_dir /Data/Quantification/kallisto/
+
+
+/usr/local/bin/util/support_scripts/kallisto_trans_to_gene_results.pl \
+Treated_1/abundance.tsv /Data/Trinity.Trinity.fasta.gene_trans_map > /Data/Quantification/kallisto/Treated_1/abundance.tsv.genes
+
+/usr/local/bin/util/support_scripts/kallisto_trans_to_gene_results.pl \
+Control_1/abundance.tsv /Data/Trinity.Trinity.fasta.gene_trans_map > /Data/Quantification/kallisto/Control_1/abundance.tsv.genes
+
+##
+/usr/local/bin/util/abundance_estimates_to_matrix.pl --est_method kallisto \
+    --gene_trans_map /Data/Trinity.Trinity.fasta.gene_trans_map \
+    --out_prefix kallisto \
+    --name_sample_by_basedir \
+     Control_1/abundance.tsv \
+     Treated_1/abundance.tsv 
+
+
+mv kallisto.* /Data/Quantification/kallisto/matrix/
+mv Control_1/* /Data/Quantification/kallisto/Control_1/
+

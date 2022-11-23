@@ -1,0 +1,60 @@
+mkdir -p Quantification/edgeR/Transcript
+# Differential Analysis
+docker run -v`pwd`:`pwd` trinityrnaseq/trinityrnaseq \
+/usr/local/bin/Analysis/DifferentialExpression/run_DE_analysis.pl \
+          --matrix `pwd`/Quantification/kallisto/matrix/kallisto.isoform.counts.matrix \
+          --method edgeR \
+          --output `pwd`/Quantification/edgeR/Transcript \
+          --dispersion 0.1
+
+
+
+ /usr/local/bin/Analysis/DifferentialExpression/Glimma.Trinity.Rscript \
+       --samples_file /Data/SampleDetails.txt \
+       --DE_results /Data/Quantification/edgeR/Transcript/kallisto.isoform.counts.matrix.Control_1_vs_Treated_1.edgeR.DE_results \
+       --counts_matrix /Data/Quantification/edgeR/Transcript/kallisto.isoform.counts.matrix.Control_1_vs_Treated_1.edgeR.count_matrix
+
+
+
+
+####################
+mkdir -p Quantification/edgeR/Gene
+
+docker run -v`pwd`:`pwd` trinityrnaseq/trinityrnaseq \
+/usr/local/bin/Analysis/DifferentialExpression/run_DE_analysis.pl \
+          --matrix `pwd`/Quantification/kallisto/matrix/kallisto.gene.counts.matrix \
+          --method edgeR \
+          --output `pwd`/Quantification/edgeR/Gene/ \
+          --dispersion 0.1
+
+
+ /usr/local/bin/Analysis/DifferentialExpression/Glimma.Trinity.Rscript \
+       --samples_file samples.txt \
+       --DE_results /Data/Quantification/edgeR/Gene/kallisto.gene.counts.matrix.Control_1_vs_Treated_1.edgeR.DE_results \
+       --counts_matrix /Data/Quantification/edgeR/Gene/kallisto.gene.counts.matrix.Control_1_vs_Treated_1.edgeR.count_matrix
+
+
+
+
+#-----------------------------------------------------Additional analysss----------------------
+##GO enrichment analysis
+
+docker run -it -v `pwd`:`pwd` -v /home/jibin/Downloads/RNAseqProjects/:/Data trinityrnaseq/trinityrnaseq
+
+cd /Data/Quantification/edgeR/Gene/
+
+mkdir AdditionalAnalysis/
+/usr/local/bin/Analysis/DifferentialExpression/analyze_diff_expr.pl \
+--matrix /Data/Quantification/kallisto/matrix/kallisto.gene.TMM.EXPR.matrix \
+--examine_GO_enrichment --GO_annots /Data/Trinotate/Gene_go_annotations.txt \
+--gene_lengths /Data/Trinity.gene_lengths.txt -P 0.1 -C 1 \
+--include_GOplot \
+--output /Data/Quantification/edgeR/Gene/AdditionalAnalysis/GO_diffExpr.P0.1_C1 
+
+mv *subset* AdditionalAnalysis ;mv GO_diffExpr* AdditionalAnalysis
+
+
+
+
+/usr/local/bin/Analysis/DifferentialExpression/define_clusters_by_cutting_tree.pl \
+                                    -R  /Data/Quantification/edgeR/Gene/AdditionalAnalysis/GO_diffExpr.P0.1_C1.matrix.RData --Ptree 60

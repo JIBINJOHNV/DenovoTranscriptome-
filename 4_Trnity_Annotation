@@ -1,0 +1,175 @@
+
+
+#TransDecoder (Find Coding Regions Within Transcripts)
+      #Step 1: extract the long open reading frames
+
+mkdir -p TransDecoder
+/home/jibin/Softwar/TransDecoder-TransDecoder-v5.5.0/TransDecoder.LongOrfs  -t Trinity.Trinity.fasta --output_dir TransDecoder/
+
+##BlastP Search
+#copy uniprot_sprot.fasta file to BLAST folder
+makeblastdb -in /home/jibin/Downloads/Database/uniprot_sprot.fasta -parse_seqids -blastdb_version 5  -title "Cookbook demo" -dbtype prot
+
+blastp -query TransDecoder/longest_orfs.pep \
+    -db /home/jibin/Downloads/Database/BLAST/uniprot_sprot.fasta  -max_target_seqs 1 \
+    -outfmt 6 -evalue 1e-5 -num_threads 10 > TransDecoder/blastp.outfmt6
+
+##Pfam Search
+hmmpress /home/jibin/Downloads/Database/Pfam-A.hmm
+hmmscan --cpu 8 --domtblout TransDecoder/pfam.domtblout /home/jibin/Downloads/Database/Pfam-A.hmm TransDecoder/longest_orfs.pep
+
+
+
+#Integrating the Blast and Pfam search results into coding region selection
+/home/jibin/Softwar/TransDecoder-TransDecoder-v5.5.0/TransDecoder.Predict -t Trinity.Trinity.fasta \
+               --retain_pfam_hits TransDecoder/pfam.domtblout --retain_blastp_hits TransDecoder/blastp.outfmt6 --output_dir  TransDecoder/
+
+mkdir TransDecoder_Homology
+mv *transdecode* TransDecoder_Homology ;rm *cmd
+
+#################################--------------------Trinotate--------------------------------------############################
+
+#Blast Commands
+
+mkdir -p Trinotate 
+blastx -query Trinity.Trinity.fasta -db /home/jibin/Downloads/Database/BLAST/uniprot_sprot.fasta \
+                      -num_threads 8 -max_target_seqs 1 -outfmt 6 -evalue 1e-3 > Trinotate/blastx.outfmt6
+blastp -query TransDecoder_Homology/Trinity.Trinity.fasta.transdecoder.pep \
+                      -db /home/jibin/Downloads/Database/BLAST/uniprot_sprot.fasta -num_threads 8 \
+                      -max_target_seqs 1 -outfmt 6 -evalue 1e-3 > Trinotate/blastp.outfmt6
+
+
+##hmmscan (HMMER) command:
+hmmscan --cpu 12 --domtblout Trinotate/TrinotatePFAM.out /home/jibin/Downloads/Database/Pfam-A.hmm TransDecoder_Homology/Trinity.Trinity.fasta.transdecoder.pep > Trinotate/pfam.log	
+
+##Running RNAMMER to identify rRNA transcripts
+/home/jibin/Softwar/Trinotate-Trinotate-v3.2.2/util/rnammer_support/RnammerTranscriptome.pl --transcriptome Trinity.Trinity.fasta \
+                         --path_to_rnammer /home/jibin/Softwar/rnammer-1.2/rnammer
+
+mv transcriptSuperScaffold* Trinotate ; mv *gff Trinotate
+
+##signalp
+/home/jibin/Softwar/signalp-4.1/signalp -f short -n Trinotate/signalp.out  TransDecoder_Homology/Trinity.Trinity.fasta.transdecoder.pep
+
+#tmhmm command:
+/home/jibin/Softwar/tmhmm-2.0c/bin/tmhmm --short < TransDecoder_Homology/Trinity.Trinity.fasta.transdecoder.pep > Trinotate/tmhmm.out	
+
+rm -rf TMHMM_*
+
+###########Loading generated results into a Trinotate SQLite Database 
+
+#1. Load transcripts and coding regions
+
+docker run -v`pwd`:`pwd` trinityrnaseq/trinityrnaseq 
+/usr/local/bin/util/support_scripts/get_Trinity_gene_to_trans_map.pl `pwd`/Trinity.Trinity.fasta >  `pwd`/Trinity.fasta.gene_trans_map
+
+
+##Create Trinotate.sqlite data abase
+/home/jibin/Softwar/Trinotate-Trinotate-v3.2.2/admin/Build_Trinotate_Boilerplate_SQLite_db.pl Trinotate
+
+/home/jibin/Softwar/Trinotate-Trinotate-v3.2.2/Trinotate Trinotate.sqlite init --gene_trans_map Trinity.Trinity.fasta.gene_trans_map \
+--transcript_fasta Trinity.Trinity.fasta  --transdecoder_pep TransDecoder_Homology/Trinity.Trinity.fasta.transdecoder.pep
+
+
+/home/jibin/Softwar/Trinotate-Trinotate-v3.2.2/Trinotate Trinotate.sqlite LOAD_swissprot_blastp Trinotate/blastp.outfmt6	
+/home/jibin/Softwar/Trinotate-Trinotate-v3.2.2/Trinotate Trinotate.sqlite LOAD_swissprot_blastx Trinotate/blastx.outfmt6	
+
+/home/jibin/Softwar/Trinotate-Trinotate-v3.2.2/Trinotate Trinotate.sqlite LOAD_pfam Trinotate/TrinotatePFAM.out
+/home/jibin/Softwar/Trinotate-Trinotate-v3.2.2/Trinotate Trinotate.sqlite LOAD_tmhmm Trinotate/tmhmm.out
+
+/home/jibin/Softwar/Trinotate-Trinotate-v3.2.2/Trinotate Trinotate.sqlite LOAD_signalp Trinotate/signalp.out
+/home/jibin/Softwar/Trinotate-Trinotate-v3.2.2/Trinotate Trinotate.sqlite report > Trinotate/trinotate_annotation_report.xls
+
+
+
+###########################-------------------------Gene Ontology Enrichment using Trinotate and GOseq --------------------------------#################################
+
+#Extract GO assignments per gene
+/home/jibin/Softwar/Trinotate-Trinotate-v3.2.2/util/extract_GO_assignments_from_Trinotate_xls.pl \
+                         --Trinotate_xls Trinotate/trinotate_annotation_report.xls \
+                         --gene --include_ancestral_terms \
+                         > Trinotate/Gene_go_annotations.txt
+
+
+/home/jibin/Softwar/Trinotate-Trinotate-v3.2.2/util/extract_GO_assignments_from_Trinotate_xls.pl \
+                         --Trinotate_xls Trinotate/trinotate_annotation_report.xls \
+                         --trans --include_ancestral_terms \
+                         > Trinotate/Transcript_go_annotations.txt
+
+
+
+
+#create a gene lengths file
+docker run -v`pwd`:`pwd` trinityrnaseq/trinityrnaseq \
+/usr/local/bin/util/misc/fasta_seq_length.pl \
+`pwd`/Trinity.Trinity.fasta > \
+`pwd`/Trinity.fasta.seq_lens
+
+
+docker run -v`pwd`:`pwd` trinityrnaseq/trinityrnaseq \
+/usr/local/bin/util/misc/TPM_weighted_gene_length.py  \
+         --gene_trans_map `pwd`/Trinity.Trinity.fasta.gene_trans_map \
+         --trans_lengths `pwd`/Trinity.fasta.seq_lens \
+         --TPM_matrix `pwd`/Quantification/kallisto/matrix/kallisto.isoform.TPM.not_cross_norm > \
+         `pwd`/Trinity.gene_lengths.txt
+
+
+
+
+#Add Annotations to Expression Matrices
+/home/jibin/Softwar/Trinotate-Trinotate-v3.2.2/util/Trinotate_get_feature_name_encoding_attributes.pl \
+                  Trinotate/trinotate_annotation_report.xls  > Trinotate/annot_feature_map.txt
+
+docker run -v`pwd`:`pwd` trinityrnaseq/trinityrnaseq \
+/usr/local/bin/Analysis/DifferentialExpression/rename_matrix_feature_identifiers.pl \
+    `pwd`/Quantification/kallisto/matrix/kallisto.isoform.counts.matrix `pwd`/Trinotate/annot_feature_map.txt > `pwd`/Quantification/kallisto/matrix/Trinity_trans.counts.wAnnot.matrix
+
+
+docker run -v`pwd`:`pwd` trinityrnaseq/trinityrnaseq \
+/usr/local/bin/Analysis/DifferentialExpression/rename_matrix_feature_identifiers.pl \
+    `pwd`/Quantification/kallisto/matrix/kallisto.gene.counts.matrix `pwd`/Trinotate/annot_feature_map.txt > `pwd`/Quantification/kallisto/matrix/Trinity_gene.counts.wAnnot.matrix
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#Run GOseq
+docker run -v`pwd`:`pwd` trinityrnaseq/trinityrnaseq \
+/usr/local/bin/Analysis/DifferentialExpression/run_GOseq.pl \
+                       --GO_assignments `pwd`/go_annotations.txt \
+                       --lengths `pwd`/Trinity.gene_lengths.txt
+
+
+                                              --factor_labeling  factor_labeling.txt \
+
+
+
+
+./nextflow run TransPi.nf --all --reads '/home/jibin/Downloads/Transpi/*_R[1,2]*.fastq.gz' \
+     --k 25,41,53 --maxReadLen 75 -profile docker
